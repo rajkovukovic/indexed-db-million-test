@@ -4,12 +4,9 @@ import { productsDB } from './schema';
 import { generateMockData } from './generate-mock';
 
 
-const idGetter = (thing: any) => thing.id;
-const namedIdGetter = (name: string) => (thing: any) => thing[name].id;
-
-let products: any[];
-let tags: any[];
-let relations: any[];
+let products: any[] = [];
+let tags: any[] = [];
+let relations: any[] = [];
 let insertProgress: any = {
   productsDone: 0,
   tagsDone: 0,
@@ -52,7 +49,8 @@ async function bulkInsertData(db: lf.Database) {
 
 function addSampleData(db: lf.Database) {
   console.time('generateMockData');
-  ({ products, tags, relations } = generateMockData(1000 * 1000, 20 * 1000));
+  // ({ products, tags } = generateMockData(20 * 1000, 1 * 1000));
+  ({ tags } = generateMockData(1000 * 1000, 50 * 1000));
   console.timeEnd('generateMockData');
   // console.log(JSON.stringify({ products, tags, relations }));
 
@@ -76,7 +74,7 @@ function insertData(db: lf.Database, data: any[], tableSchema: lf.schema.Table) 
 }
 
 function checkForExistingData(db: lf.Database) {
-  var product = db.getSchema().table('Product');
+  var product = db.getSchema().table('Tag');
   var column = lf.fn.count(product.id);
   return db
     .select(column)
@@ -89,9 +87,7 @@ function checkForExistingData(db: lf.Database) {
 
 export function connectDB() {
   let db: lf.Database;
-  let product: lf.schema.Table;
   let tag: lf.schema.Table;
-  let productTag: lf.schema.Table;
 
   return productsDB
     .getSchemaBuilder()
@@ -101,9 +97,7 @@ export function connectDB() {
     .then(function (database) {
       console.log({ database });
       db = database;
-      product = db.getSchema().table('Product')
       tag = db.getSchema().table('Tag')
-      productTag = db.getSchema().table('ProductTag')
       return checkForExistingData(database);
     })
     .then((dataExist: boolean) => {
@@ -112,76 +106,66 @@ export function connectDB() {
       return dataExist ? Promise.resolve() : addSampleData(db) as any;
     }).then(async () => {
 
-      console.time('selectedTagIds');
-      const selectedTagIds = (await db.select(tag.id)
+      let selectedTagIds = [42, 512];
+
+      console.time('filter-products');
+      const selectedTags: any[] = (await db.select()
         .from(tag)
-        .limit(2)
-        .exec()).map((tag: any) => tag.id);
-      console.timeEnd('selectedTagIds');
+        .where(tag.id.in(selectedTagIds))
+        .exec());
 
-      // const tagRelations = await db.select()
-      //   .from(productTag)
-      //   .where(productTag.tagId.in(selectedTagIds))
-      //   .exec();
+      const filteredProductIds = new Set<number>([...selectedTags[0].productIds, ...selectedTags[1].productIds]);
+      console.timeEnd('filter-products');
+      console.log({ filteredProductIds: Array.from(filteredProductIds) });
 
-      console.time('filteredProducts');
-      const filteredProducts = await db.select(product.id)
-        .from(product, productTag)
-        .where(lf.op.and(
-          product.id.eq(productTag.productId),
-          productTag.tagId.in(selectedTagIds)
-        ))
-        .groupBy(product.id)
-        .exec();
-      console.timeEnd('filteredProducts');
-      console.log(filteredProducts.length);
 
-      // 
-      console.time('allRelations-select-all');
-      const allRelations = (await db.select().from(productTag).orderBy(productTag.productId).exec())
-        .map((relation: any) => [relation.productId, relation.tagId]);
-      console.timeEnd('allRelations-select-all');
-      console.log(allRelations.length);
+      console.time('get-allTags');
+      const allTags = (await db.select()
+        .from(tag)
+        .exec());
+      console.timeEnd('get-allTags');
+      console.log({ allTags });
 
-      const filteredProductIdSet = new Set(filteredProducts.map(namedIdGetter('Product')));
-      const tagSet = new Set();
-      console.time('in-memory-filtering-for-all-relations');
-      for (let [productId, tagId] of allRelations) {
-        if (filteredProductIdSet.has(productId)) {
-          tagSet.add(tagId);
+      // console.time('filter-tags');
+      // let filteredTagIds = new Set<number>();
+      // for (let tag of allTags) {
+      //   for (let productId of (tag as any).productIds) {
+      //     if (filteredProductIds.has(productId)) {
+      //       filteredTagIds.add((tag as any).id);
+      //       break;
+      //     }
+      //   }
+      // }
+      // console.timeEnd('filter-tags');
+
+
+      console.time('generate-product-map');
+      const productsMap = allTags.reduce((acc: Map<number, number[]>, tag: any) => {
+        for (let productId of tag.productIds) {
+          if (!acc.has(productId)) {
+            acc.set(productId, [tag.id]);
+          } else {
+            acc.get(productId)!.push(tag.id);
+          }
+        }
+        return acc;
+      }, new Map<number, number[]>());
+      console.timeEnd('generate-product-map');
+      console.log('product count:', productsMap.size);
+
+      console.time('filter-tags');
+      let filteredTagIds = new Set<number>();
+      for (let productId of Array.from(filteredProductIds)) {
+        for (let tagId of productsMap.get(productId)!) {
+          filteredTagIds.add(tagId);
         }
       }
-      console.timeEnd('in-memory-filtering-for-all-relations');
-      console.log(tagSet.size);
+      console.timeEnd('filter-tags');
 
-      return db;
-
-      console.time('filteredTags');
-      const filteredTags = await db.select(tag.id)
-        .from(tag, productTag)
-        .where(lf.op.or(
-          tag.id.eq(productTag.tagId),
-          productTag.productId.in(filteredProducts.map(namedIdGetter('Product')))
-        ))
-        .groupBy(tag.id)
-        .exec();
-      console.timeEnd('filteredTags');
-      console.log(filteredTags.length);
-
-      // const productRelations = await db.select()
-      //   .from(productTag)
-      //   .where(productTag.tagId.in(filteredTags as any))
-      //   .exec();
-
-      // console.log({
-      //   selectedTagIds,
-      //   filteredProductIds: filteredProducts.map((w: any) => w.Product.id),
-      //   filteredProducts,
-      //   filteredTagIds: filteredTags.map((w: any) => w.Tag.id),
-      //   filteredTags,
-      //   tagRelations,
-      //   productRelations
-      // });
+      console.log({
+        filteredProductIds: Array.from(filteredProductIds),
+        filteredTagIds: Array.from(filteredTagIds),
+      })
 
       return db;
     });

@@ -1,18 +1,18 @@
 import React, { useEffect } from 'react';
-// import * as lf from 'lovefield';
+import * as lf from 'lovefield';
 
-// import { connectDB } from './data/db';
+import { connectDB } from './data/db';
 
 function App() {
-  // useEffect(() => {
-  //   let db: lf.Database;
+  useEffect(() => {
+    let db: lf.Database;
 
-  //   connectDB().then((database: lf.Database) => {
-  //     db = database;
-  //   });
+    connectDB().then((database: lf.Database) => {
+      db = database;
+    });
 
-  //   return () => db && db.close();
-  // });
+    return () => db && db.close();
+  });
 
   return <div>Hello</div>;
 }
