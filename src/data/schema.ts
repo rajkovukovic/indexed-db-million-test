@@ -7,10 +7,10 @@ interface DB {
 export const productsDB: DB = {
   getSchemaBuilder: function (): lf.schema.Builder {
     let sc = lf.schema.create('Lio', 1);
-    sc.createTable('Product')
-      .addColumn('id', lf.Type.INTEGER)
-      // .addColumn('name', lf.Type.STRING)
-      .addPrimaryKey(['id']);
+    // sc.createTable('Product')
+    //   .addColumn('id', lf.Type.INTEGER)
+    //   // .addColumn('name', lf.Type.STRING)
+    //   .addPrimaryKey(['id']);
 
     sc.createTable('Tag')
       .addColumn('id', lf.Type.INTEGER)
@@ -19,6 +19,7 @@ export const productsDB: DB = {
       .addPrimaryKey(['id']);
 
     sc.createTable('ProductTag')
+      .addColumn('productTagMap', lf.Type.OBJECT)
       // .addColumn('productId', lf.Type.INTEGER)
       // .addColumn('tagId', lf.Type.INTEGER)
       // .addForeignKey('fk_ProductId', {

@@ -4,13 +4,12 @@ import { productsDB } from './schema';
 import { generateMockData } from './generate-mock';
 
 
-let products: any[] = [];
 let tags: any[] = [];
-let relations: any[] = [];
 let insertProgress: any = {
   productsDone: 0,
   tagsDone: 0,
   relationsDone: 0,
+  secondTableDone: false,
   mainPromise: null,
   mainPromiseResolve: null
 };
@@ -20,21 +19,29 @@ const INSERT_PER_TRANSACTION = 10000;
 async function bulkInsertData(db: lf.Database) {
   let promise = null;
 
-  if (insertProgress.productsDone < products.length) {
-    const data = products.slice(insertProgress.productsDone, insertProgress.productsDone + INSERT_PER_TRANSACTION);
-    insertProgress.productsDone += INSERT_PER_TRANSACTION;
-    promise = insertData(db, data, db.getSchema().table('Product'));
-    console.log('productsDone', insertProgress.productsDone);
-  } else if (insertProgress.tagsDone < tags.length) {
+  if (insertProgress.tagsDone < tags.length) {
     const data = tags.slice(insertProgress.tagsDone, insertProgress.tagsDone + INSERT_PER_TRANSACTION);
     insertProgress.tagsDone += INSERT_PER_TRANSACTION;
     promise = insertData(db, data, db.getSchema().table('Tag'));
-    console.log('tagsDone', insertProgress.tagsDone);
-  } else if (insertProgress.relationsDone < relations.length) {
-    const data = relations.slice(insertProgress.relationsDone, insertProgress.relationsDone + INSERT_PER_TRANSACTION);
-    insertProgress.relationsDone += INSERT_PER_TRANSACTION;
-    promise = insertData(db, data, db.getSchema().table('ProductTag'));
-    console.log('relationsDone', insertProgress.relationsDone);
+    console.log('inserting tags', insertProgress.tagsDone);
+  } else if (!insertProgress.secondTableDone) {
+    console.log('inserting productTagMap');
+    const productsMap = tags.reduce((acc: Map<number, number[]>, tag: any) => {
+      for (let productId of tag.productIds) {
+        if (!acc.has(productId)) {
+          acc.set(productId, [tag.id]);
+        } else {
+          acc.get(productId)!.push(tag.id);
+        }
+      }
+      return acc;
+    }, new Map<number, number[]>());
+    promise = insertData(
+      db,
+      [{ productTagMap: productsMap }],
+      db.getSchema().table('ProductTag')
+    );
+    insertProgress.secondTableDone = true;
   }
 
   if (promise) {
@@ -50,7 +57,7 @@ async function bulkInsertData(db: lf.Database) {
 function addSampleData(db: lf.Database) {
   console.time('generateMockData');
   // ({ products, tags } = generateMockData(20 * 1000, 1 * 1000));
-  ({ tags } = generateMockData(1000 * 1000, 50 * 1000));
+  ({ tags } = generateMockData(2 * 1000 * 1000, 50 * 1000));
   console.timeEnd('generateMockData');
   // console.log(JSON.stringify({ products, tags, relations }));
 
@@ -88,6 +95,7 @@ function checkForExistingData(db: lf.Database) {
 export function connectDB() {
   let db: lf.Database;
   let tag: lf.schema.Table;
+  let productTag: lf.schema.Table;
 
   return productsDB
     .getSchemaBuilder()
@@ -98,12 +106,13 @@ export function connectDB() {
       console.log({ database });
       db = database;
       tag = db.getSchema().table('Tag')
+      productTag = db.getSchema().table('ProductTag')
       return checkForExistingData(database);
     })
     .then((dataExist: boolean) => {
       console.log({ dataExist });
-      if (dataExist) return Promise.resolve();
-      return dataExist ? Promise.resolve() : addSampleData(db) as any;
+      if (dataExist) return Promise.resolve()
+      else return addSampleData(db);
     }).then(async () => {
 
       let selectedTagIds = [42, 512];
@@ -119,39 +128,12 @@ export function connectDB() {
       console.log({ filteredProductIds: Array.from(filteredProductIds) });
 
 
-      console.time('get-allTags');
-      const allTags = (await db.select()
-        .from(tag)
-        .exec());
-      console.timeEnd('get-allTags');
-      console.log({ allTags });
-
-      // console.time('filter-tags');
-      // let filteredTagIds = new Set<number>();
-      // for (let tag of allTags) {
-      //   for (let productId of (tag as any).productIds) {
-      //     if (filteredProductIds.has(productId)) {
-      //       filteredTagIds.add((tag as any).id);
-      //       break;
-      //     }
-      //   }
-      // }
-      // console.timeEnd('filter-tags');
-
-
-      console.time('generate-product-map');
-      const productsMap = allTags.reduce((acc: Map<number, number[]>, tag: any) => {
-        for (let productId of tag.productIds) {
-          if (!acc.has(productId)) {
-            acc.set(productId, [tag.id]);
-          } else {
-            acc.get(productId)!.push(tag.id);
-          }
-        }
-        return acc;
-      }, new Map<number, number[]>());
-      console.timeEnd('generate-product-map');
-      console.log('product count:', productsMap.size);
+      console.time('get-product-to-tag-map');
+      const productsMap = ((await db.select()
+        .from(productTag)
+        .exec())[0] as any).productTagMap;
+      console.timeEnd('get-product-to-tag-map');
+      console.log({ productsMap });
 
       console.time('filter-tags');
       let filteredTagIds = new Set<number>();
